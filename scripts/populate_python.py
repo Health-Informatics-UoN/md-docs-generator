@@ -3,71 +3,120 @@ import ast
 from typing import List, Tuple
 
 
-def get_source_segment(source: str, node: ast.AST) -> str:
-    """Extract the source code segment for a given AST node."""
-    source_lines = source.splitlines()
-    start_line = node.lineno - 1
-    end_line = node.end_lineno if hasattr(node, "end_lineno") else start_line + 1
-
-    # Get the full lines
-    lines = source_lines[start_line:end_line]
-
-    # For function and class definitions, we need to find the end of the signature
-    # (the colon that's not inside any parentheses)
-    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-        full_text = "\n".join(lines)
-        paren_count = 0
-        for i, char in enumerate(full_text):
-            if char == "(":
-                paren_count += 1
-            elif char == ")":
-                paren_count -= 1
-            elif char == ":" and paren_count == 0:
-                return full_text[: i + 1]
-
-        return "\n".join(lines)
-
-
-def extract_signatures(source: str) -> List[Tuple[str, str, str]]:
+def render_name(name: str, entity_type: str = "") -> str:
     """
-    Extract function and class signatures from Python source code.
-    Returns a list of tuples (type, name, signature) where type is either 'function' or 'class'.
+    Renders the name of an entity for markdown
+
+    Parameters
+    ----------
+    name: str
+        The name of the entity
+    entity_type: str
+        The kind of entity we're rendering. "method" and "class" have slightly different formatting.
+        The default is just a def, for functions
+
+    Returns
+    -------
+    str
+        The name of the entity, formatted for markdown
     """
-    tree = ast.parse(source)
-    signatures = []
+    if entity_type == "method":
+        return f"#### `{name}`\n```\nmethod {name}"
+    elif entity_type == "class":
+        return f"### `{name}`\n```\nclass {name}"
+    else:
+        return f"### `{name}`\n```\ndef {name}"
 
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            name = node.name
-            decorator_nodes = getattr(node, "decorator_list", [])
-            signature_parts = []
+def render_docstring(docstring: str, header_level: int = 4, parameters_string: str = "Parameters", returns_string: str = "Returns"):
+    """
+    Renders the docstring of an entity for markdown.
+    The header level of the subsections are configurable.
 
-            for decorator in decorator_nodes:
-                decorator_text = get_source_segment(source, decorator)
-                signature_parts.append(f"@{decorator_text}")
+    Parameters
+    ----------
+    docstring: str
+        The docstring to render
+    header_level: int
+        The level of header that the Parameters and Returns should be rendered at
+    parameters_string: str
+        The string used to delineate the parameters section
+    returns_string: str
+        The string used to delineate the returns section
 
-            signature = get_source_segment(source, node)
-            signature_parts.append(signature)
+    Returns
+    -------
+    str
+        The markdown for the docstring
+    """
+    if (parameters_string in docstring) & (returns_string in docstring):
+        result, func_sig_string = docstring.split(parameters_string)
+        pars_string, ret_string = func_sig_string.split(returns_string)
+        result += "#" * header_level + f" {parameters_string}\n"
+        for line in pars_string.split("\n"):
+            if any([char.isalnum() for char in line]):
+                result += line.strip() + "\n\n"
+        result += "#" * header_level + f" {returns_string}\n"
+        for line in ret_string.split("\n"):
+            if any([char.isalnum() for char in line]):
+                result += line.strip() + "\n\n"
+    else:
+        result = docstring
+    return result
 
-            full_signature = "\n".join(signature_parts)
-            signatures.append(("function", name, full_signature))
+def build_annotation(annotation):
+    if isinstance(annotation, ast.Name):
+        return annotation.id
+    elif isinstance(annotation, ast.Subscript):
+        return f"{annotation.slice.id}[{build_annotation(annotation.value)}]"
+    else:
+        return ""
+        
+def render_args(function_args: ast.arguments):
+    result = ""
+    args = [arg.arg for arg in function_args.args]
+    annotations = [build_annotation(x) for x in [arg.annotation for arg in function_args.args]]
+    for arg, annotation in zip(args, annotations):
+        result += f"\t{arg}: {annotation}\n\n"
+    return result
+        
 
-        elif isinstance(node, ast.ClassDef):
-            name = node.name
-            decorator_nodes = getattr(node, "decorator_list", [])
-            signature_parts = []
 
-            for decorator in decorator_nodes:
-                decorator_text = get_source_segment(source, decorator)
-                signature_parts.append(f"@{decorator_text}")
+def build_function_md(function_definition: ast.FunctionDef):
+    result = ""
+    result += render_name(function_definition.name)
+    result += "(\n"
+    result += render_args(function_definition.args)
+    result += ")\n```"
+    result += "\n\n"
+    if ast.get_docstring(function_definition):
+        result += render_docstring(ast.get_docstring(function_definition))
 
-            signature = get_source_segment(source, node)
-            signature_parts.append(signature)
+    return result
 
-            full_signature = "\n".join(signature_parts)
-            signatures.append(("class", name, full_signature))
+def build_class_md(class_definition: ast.FunctionDef):
+    methods = [x for x in class_definition.body if isinstance(x, ast.FunctionDef)]
+    init_method = [x for x in methods if x.name == "__init__"][0]
+    
+    result = ""
+    result += render_name(class_definition.name, entity_type="class")
+    result += "(\n"
+    result += render_args(init_method.args)
+    result += ")\n```\n\n"
 
-    return signatures
+    result += render_docstring(ast.get_docstring(class_definition))
+    if len(methods) > 1:
+        result += "\n### Methods"
+        for method in methods:
+            result += "\n\n"
+            result += render_name(method.name, entity_type = "method")
+            result += "(\n"
+            result += render_args(method.args)
+            result += ")\n```"
+            result += "\n\n"
+            if ast.get_docstring(method):
+                result += render_docstring(ast.get_docstring(method), header_level = 5)
+
+    return result
 
 
 def populate_python(file_path: os.PathLike) -> str:
@@ -83,14 +132,14 @@ def populate_python(file_path: os.PathLike) -> str:
     with open(file_path, "r") as f:
         source = f.read()
 
-    output = []
-    signatures = extract_signatures(source)
+    result = []
 
-    for _, name, signature in signatures:
-        output.append(f"### {name}")
-        output.append("```python")
-        output.append(signature)
-        output.append("```")
-        output.append("")
+    tree = ast.parse(source)
 
-    return "\n".join(output)
+    for entity in source.body:
+        if isinstance(entity, ast.FunctionDef):
+            result.append(build_function_md(entity)
+        elif isinstance(entity, ast.ClassDef):
+            result.append(build_class_md(entity)
+
+    return "\n".join(result)

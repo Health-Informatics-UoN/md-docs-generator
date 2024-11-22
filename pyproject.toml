@@ -17,4 +17,4 @@ requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.scripts]
-nextra-docs-generator = "md_docs_generator:main"
+md-docs-generator = "md_docs_generator:main"
