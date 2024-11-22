@@ -11,6 +11,7 @@ def main():
     )
 
     for in_file in file_list:
+        print(f"Trying to render {in_file}")
         if args.trim_extension:
             if "." in in_file:
                 filename = in_file[: in_file.rindex(".")]
@@ -26,7 +27,12 @@ def main():
         if args.python:
             if in_file[-3:] == ".py":
                 file_contents += "\n"
-                file_contents += populate_python(Path(args.input_directory, in_file))
+                try:
+                    file_contents += populate_python(
+                        Path(args.input_directory, in_file)
+                    )
+                except ValueError:
+                    print(f"Problem rendering {in_file}")
         out_filename = Path(args.output_directory, filename + args.output_extension)
         out_filename.parent.mkdir(exist_ok=True, parents=True)
         with open(out_filename, "w") as f:

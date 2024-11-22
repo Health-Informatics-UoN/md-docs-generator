@@ -1,6 +1,5 @@
 import os
 import ast
-from typing import List, Tuple
 
 
 def render_name(name: str, entity_type: str = "") -> str:
@@ -27,7 +26,13 @@ def render_name(name: str, entity_type: str = "") -> str:
     else:
         return f"### `{name}`\n```\ndef {name}"
 
-def render_docstring(docstring: str, header_level: int = 4, parameters_string: str = "Parameters", returns_string: str = "Returns"):
+
+def render_docstring(
+    docstring: str,
+    header_level: int = 4,
+    parameters_string: str = "Parameters",
+    returns_string: str = "Returns",
+):
     """
     Renders the docstring of an entity for markdown.
     The header level of the subsections are configurable.
@@ -63,22 +68,29 @@ def render_docstring(docstring: str, header_level: int = 4, parameters_string: s
         result = docstring
     return result
 
+
 def build_annotation(annotation):
     if isinstance(annotation, ast.Name):
         return annotation.id
     elif isinstance(annotation, ast.Subscript):
-        return f"{annotation.slice.id}[{build_annotation(annotation.value)}]"
+        try:
+            return f"{annotation.slice.id}[{build_annotation(annotation.value)}]"
+        except AttributeError:
+            print("Couldn't parse Subscript")
+            return ""
     else:
         return ""
-        
+
+
 def render_args(function_args: ast.arguments):
     result = ""
     args = [arg.arg for arg in function_args.args]
-    annotations = [build_annotation(x) for x in [arg.annotation for arg in function_args.args]]
+    annotations = [
+        build_annotation(x) for x in [arg.annotation for arg in function_args.args]
+    ]
     for arg, annotation in zip(args, annotations):
         result += f"\t{arg}: {annotation}\n\n"
     return result
-        
 
 
 def build_function_md(function_definition: ast.FunctionDef):
@@ -93,28 +105,36 @@ def build_function_md(function_definition: ast.FunctionDef):
 
     return result
 
-def build_class_md(class_definition: ast.FunctionDef):
+
+def build_class_md(class_definition: ast.ClassDef):
     methods = [x for x in class_definition.body if isinstance(x, ast.FunctionDef)]
-    init_method = [x for x in methods if x.name == "__init__"][0]
-    
+    try:
+        init_method = [x for x in methods if x.name == "__init__"][0]
+    except IndexError:
+        print(f"No methods in {class_definition.name}")
+
     result = ""
     result += render_name(class_definition.name, entity_type="class")
     result += "(\n"
-    result += render_args(init_method.args)
+    try:
+        result += render_args(init_method.args)
+    except UnboundLocalError:
+        print(f"No init method for {class_definition.name}")
     result += ")\n```\n\n"
 
-    result += render_docstring(ast.get_docstring(class_definition))
+    if ast.get_docstring(class_definition):
+        result += render_docstring(ast.get_docstring(class_definition))
     if len(methods) > 1:
         result += "\n### Methods"
         for method in methods:
             result += "\n\n"
-            result += render_name(method.name, entity_type = "method")
+            result += render_name(method.name, entity_type="method")
             result += "(\n"
             result += render_args(method.args)
             result += ")\n```"
             result += "\n\n"
             if ast.get_docstring(method):
-                result += render_docstring(ast.get_docstring(method), header_level = 5)
+                result += render_docstring(ast.get_docstring(method), header_level=5)
 
     return result
 
@@ -136,10 +156,10 @@ def populate_python(file_path: os.PathLike) -> str:
 
     tree = ast.parse(source)
 
-    for entity in source.body:
+    for entity in tree.body:
         if isinstance(entity, ast.FunctionDef):
-            result.append(build_function_md(entity)
+            result.append(build_function_md(entity))
         elif isinstance(entity, ast.ClassDef):
-            result.append(build_class_md(entity)
+            result.append(build_class_md(entity))
 
     return "\n".join(result)
